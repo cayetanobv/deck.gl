@@ -51,6 +51,12 @@ void main(void) {
   float yBot = k * (log(tan(CRS84_PI * 0.25 + latBot * CRS84_DEG_TO_RAD * 0.5)) - mercNorth);
   cellSizeY = yTop - yBot; // row height in Mercator world Y (positive)
   cellCenter = vec2(scale * (float(xIndex) + 0.5), 0.5 * (yTop + yBot));
+  // The per-row reprojection is anchored per tile in float32, so adjacent tiles can leave a
+  // sub-pixel transparent gap at their shared latitude — the basemap shows through as a white
+  // line, worst at high latitude. Grow each row by ~1px of common space so neighbouring rows and
+  // tiles overlap instead of gapping. Cells are opaque, so the overlap is invisible; only the
+  // rendered quad is inflated (cellCenter is unchanged), so cell positions stay exact.
+  cellSizeY += project_pixel_size(1.5);
 #endif
 
   vec4 color = column.isStroke ? instanceLineColors : instanceFillColors;
