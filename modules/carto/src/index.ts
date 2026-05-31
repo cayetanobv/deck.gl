@@ -48,6 +48,7 @@ export type {RasterLayerProps} from './layers/raster-layer';
 export type {RasterTileLayerProps} from './layers/raster-tile-layer';
 export type {SpatialIndexTileLayerProps} from './layers/spatial-index-tile-layer';
 export type {VectorTileLayerProps} from './layers/vector-tile-layer';
+export type {TileMatrixSet} from './layers/tile-matrix-set';
 
 // Helpers
 export {

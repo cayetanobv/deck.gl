@@ -10,6 +10,7 @@ registerLoaders([CartoSpatialTileLoader]);
 import {PickingInfo} from '@deck.gl/core';
 import {TileLayer, _Tile2DHeader as Tile2DHeader, TileLayerProps} from '@deck.gl/geo-layers';
 import {DEFAULT_TILE_SIZE} from '../constants';
+import {TileMatrixSet} from './tile-matrix-set';
 
 function isFeatureIdDefined(value: unknown): boolean {
   return value !== undefined && value !== null && value !== '';
@@ -24,7 +25,10 @@ export type SpatialIndexTileLayerProps<DataT = unknown> = _SpatialIndexTileLayer
   TileLayerProps<DataT>;
 
 /** Properties added by SpatialIndexTileLayer. */
-type _SpatialIndexTileLayerProps = {};
+type _SpatialIndexTileLayerProps = {
+  /** Tile Matrix Set the spatial index is defined in. Threaded to the Tileset2D. */
+  tileMatrixSet?: TileMatrixSet;
+};
 
 export default class SpatialIndexTileLayer<
   DataT = any,
@@ -37,6 +41,11 @@ export default class SpatialIndexTileLayer<
     hoveredFeatureId: BigInt | number | null;
     highlightColor: number[];
   };
+
+  // Forward the TMS into the Tileset2D options so the tileset can pick a TMS-aware tile cover.
+  _getTilesetOptions() {
+    return {...super._getTilesetOptions(), tileMatrixSet: this.props.tileMatrixSet};
+  }
 
   protected _updateAutoHighlight(info: PickingInfo): void {
     const {hoveredFeatureId} = this.state;

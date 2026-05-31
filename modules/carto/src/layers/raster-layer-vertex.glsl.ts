@@ -30,6 +30,29 @@ void main(void) {
   // Avoid precision issues by applying 0.5 offset here, rather than when laying out vertices
   vec2 cellCenter = scale * vec2(float(xIndex) + 0.5, float(yIndex) - 0.5);
 
+  // Cell Y extent. Uniform (== scale) for WebMercatorQuad; per-row for GoogleCRS84Quad below.
+  float cellSizeY = scale;
+
+#ifdef GOOGLE_CRS84_QUAD
+  // GoogleCRS84Quad (plate carrée): pixel rows are uniform in latitude, NOT in Mercator world Y.
+  // Reproject each row's latitude band onto Mercator world Y so rows land correctly on a Mercator
+  // basemap. column.offset.y already carries the Mercator world Y of the tile's north edge
+  // (computed on the CPU in float64), so we only add small, well-conditioned per-row offsets here.
+  #define CRS84_PI 3.141592653589793
+  #define CRS84_DEG_TO_RAD 0.017453292519943295
+  #define CRS84_WORLD_SIZE 512.0
+  float row = float(-yIndex); // 0-based pixel row from the tile's north edge
+  float latTop = raster.northLat - row * raster.dLat;
+  float latBot = latTop - raster.dLat;
+  float mercNorth = log(tan(CRS84_PI * 0.25 + raster.northLat * CRS84_DEG_TO_RAD * 0.5));
+  float k = CRS84_WORLD_SIZE / (2.0 * CRS84_PI);
+  // Mercator world Y relative to the tile's north edge (north-up, negative going south)
+  float yTop = k * (log(tan(CRS84_PI * 0.25 + latTop * CRS84_DEG_TO_RAD * 0.5)) - mercNorth);
+  float yBot = k * (log(tan(CRS84_PI * 0.25 + latBot * CRS84_DEG_TO_RAD * 0.5)) - mercNorth);
+  cellSizeY = yTop - yBot; // row height in Mercator world Y (positive)
+  cellCenter = vec2(scale * (float(xIndex) + 0.5), 0.5 * (yTop + yBot));
+#endif
+
   vec4 color = column.isStroke ? instanceLineColors : instanceFillColors;
 
   // if alpha == 0.0 or z < 0.0, do not render element
@@ -67,8 +90,9 @@ void main(void) {
 
   geometry.pickingColor = picking_getPickingColorFromInstanceID();
 
-  // Cell coordinates centered on origin
-  vec2 base = positions.xy * scale * strokeOffsetRatio * column.coverage * shouldRender;
+  // Cell coordinates centered on origin. Y uses cellSizeY so GoogleCRS84Quad rows tile without
+  // gaps after reprojection; for WebMercatorQuad cellSizeY == scale so this is unchanged.
+  vec2 base = positions.xy * vec2(scale, cellSizeY) * strokeOffsetRatio * column.coverage * shouldRender;
   vec3 cell = vec3(base, project_size(elevation));
   DECKGL_FILTER_SIZE(cell, geometry);
 

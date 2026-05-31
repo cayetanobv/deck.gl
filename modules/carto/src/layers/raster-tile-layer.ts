@@ -15,6 +15,7 @@ import QuadbinTileset2D from './quadbin-tileset-2d';
 import type {TilejsonResult} from '@carto/api-client';
 import {TilejsonPropType, mergeLoadOptions} from './utils';
 import {DEFAULT_TILE_SIZE} from '../constants';
+import {resolveTileMatrixSet, TileMatrixSet} from './tile-matrix-set';
 import {TileLayer, TileLayerProps} from '@deck.gl/geo-layers';
 import {copy, PostProcessModifier} from './post-process-utils';
 import {registerLoaders} from '@loaders.gl/core';
@@ -31,7 +32,8 @@ export const renderSubLayers = props => {
 const defaultProps: DefaultProps<RasterTileLayerProps> = {
   data: TilejsonPropType,
   refinementStrategy: 'no-overlap',
-  tileSize: DEFAULT_TILE_SIZE
+  tileSize: DEFAULT_TILE_SIZE,
+  tileMatrixSet: null
 };
 
 /** All properties supported by RasterTileLayer. */
@@ -39,13 +41,27 @@ export type RasterTileLayerProps<DataT = unknown> = _RasterTileLayerProps<DataT>
   CompositeLayerProps;
 
 /** Properties added by RasterTileLayer. */
-type _RasterTileLayerProps<DataT> = Omit<RasterLayerProps<DataT>, 'data'> &
+type _RasterTileLayerProps<DataT> = Omit<RasterLayerProps<DataT>, 'data' | 'tileMatrixSet'> &
   Omit<TileLayerProps<DataT>, 'data'> & {
     data: null | TilejsonResult | Promise<TilejsonResult>;
+
+    /**
+     * Tile Matrix Set the raster tiles are indexed in. When omitted it is read from the raster
+     * metadata (`tile_matrix_set`), defaulting to `'WebMercatorQuad'` for back-compat.
+     */
+    tileMatrixSet?: TileMatrixSet | null;
   };
 
 class PostProcessTileLayer extends PostProcessModifier(TileLayer, copy) {
   static layerName = 'PostProcessTileLayer';
+
+  // Forward the TMS into the Tileset2D options so the tileset can pick a TMS-aware tile cover.
+  _getTilesetOptions() {
+    return {
+      ...super._getTilesetOptions(),
+      tileMatrixSet: (this.props as {tileMatrixSet?: TileMatrixSet}).tileMatrixSet
+    };
+  }
 
   filterSubLayer(context: FilterContext) {
     // Handle DrawCallbackLayer
@@ -75,6 +91,13 @@ export default class RasterTileLayer<
     if (!tileJSON) return null;
 
     const {tiles: data, minzoom: minZoom, maxzoom: maxZoom, raster_metadata: metadata} = tileJSON;
+    // TODO: drop the casts once the pinned @carto/api-client adds `tile_matrix_set` to
+    // RasterMetadata / Tilejson (see carto-api-client feat/tile-matrix-set-metadata).
+    const tileMatrixSet = resolveTileMatrixSet(
+      this.props.tileMatrixSet,
+      (metadata as {tile_matrix_set?: string} | undefined)?.tile_matrix_set ??
+        (tileJSON as {tile_matrix_set?: string}).tile_matrix_set
+    );
     const SubLayerClass = this.getSubLayerClass('tile', PostProcessTileLayer);
     const loadOptions = this.getLoadOptions();
     return new SubLayerClass(this.props, {
@@ -85,6 +108,7 @@ export default class RasterTileLayer<
       renderSubLayers,
       minZoom,
       maxZoom,
+      tileMatrixSet,
       loadOptions: {
         ...loadOptions,
         cartoRasterTile: {...loadOptions?.cartoRasterTile, metadata}

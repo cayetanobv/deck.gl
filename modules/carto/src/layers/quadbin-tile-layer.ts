@@ -10,6 +10,7 @@ import {hexToBigInt} from 'quadbin';
 import type {TilejsonResult} from '@carto/api-client';
 import {TilejsonPropType, mergeLoadOptions} from './utils';
 import {DEFAULT_TILE_SIZE} from '../constants';
+import {resolveTileMatrixSet, TileMatrixSet} from './tile-matrix-set';
 
 export const renderSubLayers = props => {
   const {data} = props;
@@ -22,7 +23,8 @@ export const renderSubLayers = props => {
 
 const defaultProps: DefaultProps<QuadbinTileLayerProps> = {
   data: TilejsonPropType,
-  tileSize: DEFAULT_TILE_SIZE
+  tileSize: DEFAULT_TILE_SIZE,
+  tileMatrixSet: null
 };
 
 /** All properties supported by QuadbinTileLayer. */
@@ -30,9 +32,15 @@ export type QuadbinTileLayerProps<DataT = unknown> = _QuadbinTileLayerProps<Data
   CompositeLayerProps;
 
 /** Properties added by QuadbinTileLayer. */
-type _QuadbinTileLayerProps<DataT> = Omit<QuadbinLayerProps<DataT>, 'data'> &
-  Omit<SpatialIndexTileLayerProps<DataT>, 'data'> & {
+type _QuadbinTileLayerProps<DataT> = Omit<QuadbinLayerProps<DataT>, 'data' | 'tileMatrixSet'> &
+  Omit<SpatialIndexTileLayerProps<DataT>, 'data' | 'tileMatrixSet'> & {
     data: null | TilejsonResult | Promise<TilejsonResult>;
+
+    /**
+     * Tile Matrix Set the quadbin tiles are indexed in. When omitted it is read from the tileset
+     * metadata (`tile_matrix_set`), defaulting to `'WebMercatorQuad'` for back-compat.
+     */
+    tileMatrixSet?: TileMatrixSet | null;
   };
 
 export default class QuadbinTileLayer<
@@ -55,6 +63,11 @@ export default class QuadbinTileLayer<
     if (!tileJSON) return null;
 
     const {tiles: data, maxresolution: maxZoom} = tileJSON;
+    // TODO: drop the cast once the pinned @carto/api-client adds `tile_matrix_set` to Tilejson.
+    const tileMatrixSet = resolveTileMatrixSet(
+      this.props.tileMatrixSet,
+      (tileJSON as {tile_matrix_set?: string}).tile_matrix_set
+    );
     const SubLayerClass = this.getSubLayerClass('spatial-index-tile', SpatialIndexTileLayer);
     return new SubLayerClass(this.props, {
       id: `quadbin-tile-layer-${this.props.id}`,
@@ -63,6 +76,7 @@ export default class QuadbinTileLayer<
       TilesetClass: QuadbinTileset2D as any,
       renderSubLayers,
       maxZoom,
+      tileMatrixSet,
       loadOptions: this.getLoadOptions()
     });
   }

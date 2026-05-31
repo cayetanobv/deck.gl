@@ -11,8 +11,11 @@ import {
   DefaultProps,
   PickingInfo
 } from '@deck.gl/core';
+import type {ShaderModule} from '@luma.gl/shadertools';
 import {ColumnLayer, ColumnLayerProps} from '@deck.gl/layers';
-import {quadbinToOffset} from './quadbin-utils';
+import {cellToTile} from 'quadbin';
+import {latitudeToWorldY, quadbinToOffset} from './quadbin-utils';
+import {DEFAULT_TILE_MATRIX_SET, TileMatrixSet} from './tile-matrix-set';
 import {Raster} from './schema/carto-raster-tile-loader';
 import vs from './raster-layer-vertex.glsl';
 import {createBinaryProxy} from '../utils';
@@ -30,6 +33,26 @@ const defaultProps: DefaultProps<RasterLayerProps> = {
   ]
 };
 
+// Per-tile uniforms for the GoogleCRS84Quad (plate carrée) raster reprojection. `northLat` is the
+// latitude of the tile's north edge and `dLat` the latitude span of a single pixel row; together
+// they let the vertex shader map each row's latitude band onto Mercator world Y.
+const rasterUniformBlock = `\
+layout(std140) uniform rasterUniforms {
+  float northLat;
+  float dLat;
+} raster;
+`;
+
+type RasterUniformProps = {northLat: number; dLat: number};
+const rasterUniforms = {
+  name: 'raster',
+  vs: rasterUniformBlock,
+  uniformTypes: {
+    northLat: 'f32',
+    dLat: 'f32'
+  }
+} as const satisfies ShaderModule<RasterUniformProps>;
+
 // Modified ColumnLayer with custom vertex shader
 // Use RTT to avoid inter-tile seams
 class RasterColumnLayer extends RTTModifier(ColumnLayer) {
@@ -39,7 +62,26 @@ class RasterColumnLayer extends RTTModifier(ColumnLayer) {
     const shaders = super.getShaders();
     const data = this.props.data as unknown as {data: Raster; length: number};
     const BLOCK_WIDTH = data.data.blockSize ?? Math.sqrt(data.length);
-    return {...shaders, defines: {...shaders.defines, BLOCK_WIDTH}, vs};
+    const defines: Record<string, any> = {...shaders.defines, BLOCK_WIDTH};
+    const modules = [...shaders.modules];
+    // Gate the plate-carrée row reprojection behind a compile-time define so WebMercatorQuad keeps
+    // the original uniform-grid layout with zero added instructions (no regression).
+    if ((this.props as {tileMatrixSet?: TileMatrixSet}).tileMatrixSet === 'GoogleCRS84Quad') {
+      defines.GOOGLE_CRS84_QUAD = 1;
+      modules.push(rasterUniforms);
+    }
+    return {...shaders, defines, modules, vs};
+  }
+
+  draw(opts: any) {
+    if ((this.props as {tileMatrixSet?: TileMatrixSet}).tileMatrixSet === 'GoogleCRS84Quad') {
+      const {northLat, dLat} = this.props as unknown as RasterUniformProps;
+      const rasterProps: RasterUniformProps = {northLat, dLat};
+      for (const model of this.state.models ?? []) {
+        model.shaderInputs.setProps({raster: rasterProps});
+      }
+    }
+    super.draw(opts);
   }
 
   initializeState() {
@@ -81,6 +123,13 @@ type _RasterLayerProps = {
    * Quadbin index of tile
    */
   tileIndex: bigint;
+
+  /**
+   * Tile Matrix Set the raster cells are indexed in. Controls how cells are laid out / reprojected.
+   *
+   * @default 'WebMercatorQuad'
+   */
+  tileMatrixSet?: TileMatrixSet;
 };
 
 type RasterColumnLayerData = {
@@ -113,6 +162,7 @@ export default class RasterLayer<DataT = any, ExtraProps = {}> extends Composite
       getLineColor,
       getLineWidth,
       tileIndex,
+      tileMatrixSet = DEFAULT_TILE_MATRIX_SET,
       updateTriggers
     } = this.props as typeof this.props & {data: Raster};
     if (!data || !tileIndex || (data as any).length === 0) return null;
@@ -121,6 +171,20 @@ export default class RasterLayer<DataT = any, ExtraProps = {}> extends Composite
     const [xOffset, yOffset, scale] = quadbinToOffset(tileIndex);
     const offset = [xOffset, yOffset];
     const lineWidthScale = scale / blockSize;
+
+    // For GoogleCRS84Quad, pixel rows are uniform in latitude and must be reprojected onto Mercator
+    // world Y in the shader. Anchor the tile's north edge in Mercator common space here (float64)
+    // and pass the per-row latitude span so the shader only computes small offsets.
+    let northLat = 0;
+    let dLat = 0;
+    if (tileMatrixSet === 'GoogleCRS84Quad' && blockSize > 0) {
+      const {y, z} = cellToTile(tileIndex);
+      const worldScale = 2 ** z;
+      northLat = 90 - (y / worldScale) * 180;
+      const southLat = 90 - ((y + 1) / worldScale) * 180;
+      dLat = (northLat - southLat) / blockSize;
+      offset[1] = latitudeToWorldY(northLat);
+    }
 
     // Filled Column Layer
     const CellLayer = this.getSubLayerClass('column', RasterColumnLayer);
@@ -144,6 +208,9 @@ export default class RasterLayer<DataT = any, ExtraProps = {}> extends Composite
         dataComparator: wrappedDataComparator,
         offset,
         lineWidthScale, // Re-use widthScale prop to pass cell scale,
+        tileMatrixSet,
+        northLat,
+        dLat,
         highlightedObjectIndex,
         highlightColor
       }

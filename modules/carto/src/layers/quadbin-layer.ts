@@ -8,9 +8,11 @@ import {
   _GeoCellLayerProps as GeoCellLayerProps
 } from '@deck.gl/geo-layers';
 import {getQuadbinPolygon} from './quadbin-utils';
+import {DEFAULT_TILE_MATRIX_SET, TileMatrixSet} from './tile-matrix-set';
 
 const defaultProps: DefaultProps<QuadbinLayerProps> = {
-  getQuadbin: {type: 'accessor', value: (d: any) => d.quadbin}
+  getQuadbin: {type: 'accessor', value: (d: any) => d.quadbin},
+  tileMatrixSet: DEFAULT_TILE_MATRIX_SET
 };
 
 /** All properties supported by QuadbinLayer. */
@@ -25,6 +27,13 @@ type _QuadbinLayerProps<DataT> = {
    * By default, it reads `quadbin` property of data object.
    */
   getQuadbin?: AccessorFunction<DataT, bigint>;
+
+  /**
+   * Tile Matrix Set the quadbin cells are indexed in, controlling how each cell maps to lng/lat.
+   *
+   * @default 'WebMercatorQuad'
+   */
+  tileMatrixSet?: TileMatrixSet;
 };
 
 export default class QuadbinLayer<DataT = any, ExtraProps extends {} = {}> extends GeoCellLayer<
@@ -35,7 +44,7 @@ export default class QuadbinLayer<DataT = any, ExtraProps extends {} = {}> exten
   static defaultProps = defaultProps;
 
   indexToBounds(): Partial<GeoCellLayer['props']> | null {
-    const {data, extruded, getQuadbin} = this.props;
+    const {data, extruded, getQuadbin, tileMatrixSet} = this.props;
     // To avoid z-fighting reduce polygon footprint when extruding
     const coverage = extruded ? 0.99 : 1;
 
@@ -44,8 +53,9 @@ export default class QuadbinLayer<DataT = any, ExtraProps extends {} = {}> exten
       _normalize: false,
       positionFormat: 'XY',
 
-      getPolygon: (x: DataT, objectInfo) => getQuadbinPolygon(getQuadbin(x, objectInfo), coverage),
-      updateTriggers: {getPolygon: coverage}
+      getPolygon: (x: DataT, objectInfo) =>
+        getQuadbinPolygon(getQuadbin(x, objectInfo), coverage, tileMatrixSet),
+      updateTriggers: {getPolygon: [coverage, tileMatrixSet]}
     };
   }
 }

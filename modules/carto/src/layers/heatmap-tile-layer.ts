@@ -305,7 +305,8 @@ class HeatmapTileLayer<DataT = any, ExtraProps extends {} = {}> extends Composit
     const PostProcessTileLayer = isH3 ? PostProcessH3TileLayer : PostProcessQuadbinTileLayer;
     const layerProps = isH3
       ? (tileLayerProps as Omit<H3TileLayerProps, 'data'>)
-      : (tileLayerProps as Omit<QuadbinTileLayerProps, 'data'>);
+      : // tileMatrixSet is irrelevant to heatmaps; omit it so its nullable type does not widen the union
+        (tileLayerProps as Omit<QuadbinTileLayerProps, 'data' | 'tileMatrixSet'>);
 
     return new PostProcessTileLayer(
       layerProps,

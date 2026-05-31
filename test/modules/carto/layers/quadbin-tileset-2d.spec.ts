@@ -80,6 +80,53 @@ test('QuadbinTileset2D', async () => {
   });
 });
 
+test('QuadbinTileset2D GoogleCRS84Quad cover', async () => {
+  const tileset = new QuadbinTileset2D({tileMatrixSet: 'GoogleCRS84Quad'});
+  const viewport = new WebMercatorViewport({
+    latitude: 0,
+    longitude: 0,
+    zoom: 2,
+    width: 300,
+    height: 200
+  });
+  tileset._viewport = viewport;
+
+  const indices = tileset.getTileIndices({viewport});
+  expect(indices.length, 'cover is non-empty').toBeGreaterThan(0);
+
+  // All covering cells are at the expected (plate-carrée) zoom level.
+  const zooms = new Set(indices.map(index => tileset.getTileZoom(index)));
+  expect([...zooms], 'all cells at z=2').toEqual([2]);
+
+  // Cell footprints are linear in latitude: each z=2 tile spans 180/4=45° lat and 360/4=90° lng.
+  for (const index of indices) {
+    const {bbox} = tileset.getTileMetadata(index) as {
+      bbox: {west: number; north: number; east: number; south: number};
+    };
+    expect(bbox.north - bbox.south, 'linear lat span').toBeCloseTo(45, 9);
+    expect(bbox.east - bbox.west, 'linear lng span').toBeCloseTo(90, 9);
+  }
+});
+
+test('QuadbinTileset2D defaults to WebMercatorQuad cover', async () => {
+  // Without a tileMatrixSet, the cover must be byte-identical to the historical Mercator path.
+  const merc = new QuadbinTileset2D({});
+  const explicit = new QuadbinTileset2D({tileMatrixSet: 'WebMercatorQuad'});
+  const viewport = new WebMercatorViewport({
+    latitude: 0,
+    longitude: 0,
+    zoom: 6,
+    width: 300,
+    height: 200
+  });
+  merc._viewport = viewport;
+  explicit._viewport = viewport;
+
+  expect(merc.getTileIndices({viewport}), 'default == explicit Mercator').toEqual(
+    explicit.getTileIndices({viewport})
+  );
+});
+
 test('QuadbinTileset2D#tileSize', async () => {
   const tileset512 = new QuadbinTileset2D({tileSize: 512});
   const tileset1024 = new QuadbinTileset2D({tileSize: 1024});
